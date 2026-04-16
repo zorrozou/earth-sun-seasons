@@ -122,6 +122,36 @@
         document.getElementById('sun-latitude').textContent = sunLatitude.toFixed(2) + '°';
         document.getElementById('solar-term').textContent = getCurrentSolarTerm(orbitAngleDeg);
         document.getElementById('moon-phase').textContent = moonPhaseNames[moonPhaseIdx];
+        
+        // 计算北京昼夜长度 (纬度39.9°)
+        var lat = 39.9 * Math.PI / 180;
+        var decl = sunLatitude * Math.PI / 180;
+        var cosHA = -Math.tan(lat) * Math.tan(decl);
+        var dayHours, sunrise, sunset;
+        if (cosHA < -1) { dayHours = 24; sunrise = '--'; sunset = '--'; }
+        else if (cosHA > 1) { dayHours = 0; sunrise = '--'; sunset = '--'; }
+        else {
+            var ha = Math.acos(cosHA) * 180 / Math.PI;
+            dayHours = ha * 2 / 15;
+            var noonMin = 12 * 60;
+            var halfDay = dayHours / 2 * 60;
+            var sr = noonMin - halfDay;
+            var ss = noonMin + halfDay;
+            sunrise = String(Math.floor(sr/60)).padStart(2,'0') + ':' + String(Math.round(sr%60)).padStart(2,'0');
+            sunset = String(Math.floor(ss/60)).padStart(2,'0') + ':' + String(Math.round(ss%60)).padStart(2,'0');
+        }
+        
+        var dayEl = document.getElementById('day-length');
+        var srEl = document.getElementById('sunrise');
+        var ssEl = document.getElementById('sunset');
+        var seasonEl = document.getElementById('season-name');
+        if (dayEl) dayEl.textContent = dayHours.toFixed(1) + '小时';
+        if (srEl) srEl.textContent = sunrise;
+        if (ssEl) ssEl.textContent = sunset;
+        if (seasonEl) {
+            var angle = ((orbitAngleDeg % 360) + 360) % 360;
+            seasonEl.textContent = angle < 90 ? '春季' : angle < 180 ? '夏季' : angle < 270 ? '秋季' : '冬季';
+        }
     }
 
     function init() {
@@ -135,7 +165,7 @@
         // 渲染器
         renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
         document.getElementById('canvas-container').appendChild(renderer.domElement);
         
         // 控制器
@@ -146,12 +176,24 @@
         controls.maxDistance = 800;
         
         // 光照
-        var ambientLight = new THREE.AmbientLight(0x404040, 0.4);
-        scene.add(ambientLight);
-        
-        var sunLight = new THREE.PointLight(0xFFFFFF, 2, 0);
+        scene.add(new THREE.AmbientLight(0x222233, 0.5));
+        var sunLight = new THREE.PointLight(0xfff5e6, 1.8, 0);
         sunLight.position.set(0, 0, 0);
         scene.add(sunLight);
+        
+        // 星空
+        var sGeo = new THREE.BufferGeometry(), sPos = [], sColors = [];
+        for (var i = 0; i < 6000; i++) {
+            var sr = 2000 + Math.random() * 3000;
+            var st = Math.random() * Math.PI * 2;
+            var sp = Math.acos(2 * Math.random() - 1);
+            sPos.push(sr*Math.sin(sp)*Math.cos(st), sr*Math.sin(sp)*Math.sin(st), sr*Math.cos(sp));
+            var sb = 0.3 + Math.random() * 0.7;
+            sColors.push(sb, sb, sb);
+        }
+        sGeo.setAttribute('position', new THREE.Float32BufferAttribute(sPos, 3));
+        sGeo.setAttribute('color', new THREE.Float32BufferAttribute(sColors, 3));
+        scene.add(new THREE.Points(sGeo, new THREE.PointsMaterial({size: 1, vertexColors: true})));
         
         // 创建天体
         createSun();
@@ -166,6 +208,7 @@
         
         // 设置控件
         setupControls();
+        setupTermClickHandler();
         
         // 开始动画
         animate();
@@ -226,12 +269,32 @@
         
         var earthMaterial = new THREE.MeshPhongMaterial({
             map: earthTexture,
-            shininess: 5
+            shininess: 8
         });
         
         earth = new THREE.Mesh(earthGeometry, earthMaterial);
         earth.userData = { clickable: true, type: 'earth' };
         earthGroup.add(earth);
+        
+        // 地球云层
+        var cloudGeo = new THREE.SphereGeometry(15 * 1.015, 48, 48);
+        var cloudCanvas = document.createElement('canvas');
+        cloudCanvas.width = 1024; cloudCanvas.height = 512;
+        var cloudCtx = cloudCanvas.getContext('2d');
+        for(var ci = 0; ci < 800; ci++) {
+            var cx = Math.random() * 1024, cy = Math.random() * 512;
+            var cr = 5 + Math.random() * 40;
+            cloudCtx.beginPath();
+            cloudCtx.arc(cx, cy, cr, 0, Math.PI * 2);
+            cloudCtx.fillStyle = 'rgba(255,255,255,' + (0.1 + Math.random() * 0.25) + ')';
+            cloudCtx.fill();
+        }
+        var cloudMesh = new THREE.Mesh(cloudGeo, new THREE.MeshPhongMaterial({
+            map: new THREE.CanvasTexture(cloudCanvas),
+            transparent: true, opacity: 0.35, depthWrite: false
+        }));
+        cloudMesh.userData = { isCloud: true };
+        earth.add(cloudMesh);
         
         // 自转轴 - 添加到earth上，随地球一起
         var axisLength = 40;
@@ -257,8 +320,8 @@
         axisMesh.add(southPole);
         
         // 北京标记
-        var beijingTheta = 206 * Math.PI / 180;
-        var beijingLat = 40 * Math.PI / 180;
+        var beijingTheta = 206.397 * Math.PI / 180;
+        var beijingLat = 39.9042 * Math.PI / 180;
         var beijingMarker = new THREE.Mesh(
             new THREE.SphereGeometry(0.3, 8, 8),
             new THREE.MeshBasicMaterial({ color: 0xFF0000 })
@@ -336,47 +399,39 @@
     }
 
     function createSolarTermLabels() {
-        // 只显示主要节气（每3个显示一个）
         var mainTerms = [0, 6, 12, 18];  // 春分、夏至、秋分、冬至
         
-        mainTerms.forEach(function(idx) {
-            var term = solarTerms[idx];
-            createLabel(term.name, term.angle, term.color);
+        solarTerms.forEach(function(term, idx) {
+            var isMain = mainTerms.indexOf(idx) !== -1;
+            var canvas = document.createElement('canvas');
+            var context = canvas.getContext('2d');
+            canvas.width = 256; canvas.height = 64;
+            context.fillStyle = term.color;
+            context.font = (isMain ? 'Bold 36px' : '24px') + ' Microsoft YaHei, sans-serif';
+            context.textAlign = 'center';
+            context.textBaseline = 'middle';
+            context.fillText(term.name, 128, 32);
+            
+            var texture = new THREE.CanvasTexture(canvas);
+            var material = new THREE.SpriteMaterial({ map: texture, transparent: true, opacity: isMain ? 1 : 0.6 });
+            var sprite = new THREE.Sprite(material);
+            
+            var rad = term.angle * Math.PI / 180;
+            var x = Math.cos(rad) * (orbitRadius + 35);
+            var z = Math.sin(rad) * (orbitRadius + 35);
+            sprite.position.set(x, isMain ? 10 : 6, z);
+            sprite.scale.set(isMain ? 35 : 22, isMain ? 12 : 8, 1);
+            sprite.userData = { angle: term.angle, termName: term.name, termIdx: idx };
+            
+            scene.add(sprite);
         });
-        
-        // 添加更多节气标签
-        for (var i = 0; i < solarTerms.length; i += 3) {
-            if (mainTerms.indexOf(i) === -1) {
-                var term = solarTerms[i];
-                createLabel(term.name, term.angle, term.color);
-            }
-        }
     }
-
-    function createLabel(name, angleDeg, color) {
-        var canvas = document.createElement('canvas');
-        var context = canvas.getContext('2d');
-        canvas.width = 256;
-        canvas.height = 64;
-        
-        context.fillStyle = color;
-        context.font = 'Bold 32px Microsoft YaHei, sans-serif';
-        context.textAlign = 'center';
-        context.textBaseline = 'middle';
-        context.fillText(name, 128, 32);
-        
-        var texture = new THREE.CanvasTexture(canvas);
-        var material = new THREE.SpriteMaterial({ map: texture, transparent: true });
-        var sprite = new THREE.Sprite(material);
-        
-        var rad = angleDeg * Math.PI / 180;
-        var x = Math.cos(rad) * (orbitRadius + 35);
-        var z = Math.sin(rad) * (orbitRadius + 35);
-        sprite.position.set(x, 8, z);
-        sprite.scale.set(30, 10, 1);
-        sprite.userData = { angle: angleDeg };
-        
-        scene.add(sprite);
+    
+    // 根据节气角度计算对应日期
+    function getTermDate(year, angleDeg) {
+        var spring = new Date(year, 2, 20);
+        var dayOffset = (angleDeg / 360) * 365.25;
+        return new Date(spring.getTime() + dayOffset * 86400000);
     }
 
     function updateEarthPosition() {
@@ -397,7 +452,7 @@
         var beijingHour = (d.getUTCHours() + 8 + d.getUTCMinutes()/60 + d.getUTCSeconds()/3600) % 24;
         var toSun = Math.atan2(-x, -z);
         var rotationFromNoon = (beijingHour - 12) * Math.PI / 12;
-        var beijingTheta = 206 * Math.PI / 180;
+        var beijingTheta = 206.397 * Math.PI / 180;
         earth.rotation.y = toSun + rotationFromNoon - beijingTheta;
         
         // 月球位置（只有月球创建后才更新）
@@ -585,14 +640,52 @@
             sun.scale.setScalar(scale);
         }
         
-        // 地球视角时相机跟随
+        // 云层缓慢旋转
+        if (earth && !paused) {
+            var cloud = earth.getObjectByProperty('isCloud', true);
+            if (cloud) {
+                var dt = realElapsed * speedLevels[currentSpeedIndex] / 1000 / 86400;
+                cloud.rotation.y += dt * 0.3 * 2 * Math.PI;
+            }
+        }
+        
+        // 地球视角时相机平滑跟随
         if (currentViewMode === 'earth' && earthGroup) {
             var earthWorldPos = earthGroup.position.clone();
-            controls.target.copy(earthWorldPos);
+            controls.target.lerp(earthWorldPos, 0.1);
         }
         
         controls.update();
         renderer.render(scene, camera);
+    }
+    
+    // 节气标签点击检测
+    function setupTermClickHandler() {
+        var raycaster = new THREE.Raycaster();
+        var mouse = new THREE.Vector2();
+        
+        renderer.domElement.addEventListener('click', function(event) {
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+            
+            raycaster.setFromCamera(mouse, camera);
+            var sprites = [];
+            scene.traverse(function(obj) {
+                if (obj.isSprite && obj.userData.termName) sprites.push(obj);
+            });
+            var intersects = raycaster.intersectObjects(sprites);
+            
+            if (intersects.length > 0) {
+                var termData = intersects[0].object.userData;
+                var year = new Date(simTime).getFullYear();
+                var targetDate = getTermDate(year, termData.angle);
+                simTime = targetDate.getTime();
+                lastRealTime = Date.now();
+                updateEarthPosition();
+                updateTimeDisplay();
+                updateInfoPanel();
+            }
+        });
     }
 
     init();
