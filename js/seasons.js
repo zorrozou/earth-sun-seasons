@@ -241,7 +241,7 @@
         for (var i = 0; i <= 128; i++) {
             var theta = (i / 128) * Math.PI * 2;
             var r = a * (1 - e * e) / (1 + e * Math.cos(theta));
-            points.push(new THREE.Vector3(Math.cos(theta) * r, 0, Math.sin(theta) * r));
+            points.push(new THREE.Vector3(Math.cos(theta) * r, 0, -Math.sin(theta) * r));
         }
         
         var orbitGeometry = new THREE.BufferGeometry().setFromPoints(points);
@@ -371,7 +371,7 @@
         // 地轴倾斜：绕X轴旋转-23.5度
         // 四季演示中：夏至轨道角度=90°，地球在(0,0,r)，太阳在-Z方向
         // 地轴偏向-Z方向，使北极指向太阳
-        earthGroup.rotation.x = -23.5 * Math.PI / 180;
+        earthGroup.rotation.x = 23.5 * Math.PI / 180;
         earthGroup.rotation.z = 0;
         
         // 初始化地球位置
@@ -391,7 +391,7 @@
         var moonOrbitPoints = [];
         for (var i = 0; i <= 64; i++) {
             var angle = (i / 64) * Math.PI * 2;
-            moonOrbitPoints.push(new THREE.Vector3(Math.cos(angle) * moonOrbitRadius, 0, Math.sin(angle) * moonOrbitRadius));
+            moonOrbitPoints.push(new THREE.Vector3(Math.cos(angle) * moonOrbitRadius, 0, -Math.sin(angle) * moonOrbitRadius));
         }
         var moonOrbitGeometry = new THREE.BufferGeometry().setFromPoints(moonOrbitPoints);
         var moonOrbitLine = new THREE.Line(moonOrbitGeometry, new THREE.LineBasicMaterial({ color: 0x888888, transparent: true, opacity: 0.3 }));
@@ -418,7 +418,7 @@
             
             var rad = term.angle * Math.PI / 180;
             var x = Math.cos(rad) * (orbitRadius + 35);
-            var z = Math.sin(rad) * (orbitRadius + 35);
+            var z = -Math.sin(rad) * (orbitRadius + 35);
             sprite.position.set(x, isMain ? 10 : 6, z);
             sprite.scale.set(isMain ? 35 : 22, isMain ? 12 : 8, 1);
             sprite.userData = { angle: term.angle, termName: term.name, termIdx: idx };
@@ -443,7 +443,7 @@
         var r = a * (1 - e * e) / (1 + e * Math.cos(orbitAngle));
         
         var x = Math.cos(orbitAngle) * r;
-        var z = Math.sin(orbitAngle) * r;
+        var z = -Math.sin(orbitAngle) * r;
         
         earthGroup.position.set(x, 0, z);
         
@@ -462,7 +462,7 @@
             var moonAngle = sunLongitude + moonPhase * 2 * Math.PI;
             
             var moonLocalX = Math.cos(moonAngle) * moonOrbitRadius;
-            var moonLocalZ = Math.sin(moonAngle) * moonOrbitRadius;
+            var moonLocalZ = -Math.sin(moonAngle) * moonOrbitRadius;
             var moonWorldPos = new THREE.Vector3(moonLocalX, 0, moonLocalZ);
             moonWorldPos.applyMatrix4(earthGroup.matrixWorld);
             moon.position.copy(moonWorldPos);
